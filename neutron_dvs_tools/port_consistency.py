@@ -76,16 +76,18 @@ def report_port_inconsistencies(dvs_ports, os_ports, vm_ref_to_inst_uuid):
     for os_port in os_ports:
         os_port_ids.add(os_port.id)
         for dvs_port in dvs_ports:
-            if dvs_port.connectee:
-                if os_port.id == dvs_port.config.name:
+            if os_port.id == dvs_port.config.name:
+                vm_inst_uuid = None
+                if dvs_port.connectee:
                     vm_ref = dvs_port.connectee.connectedEntity
-                    if vm_ref_to_inst_uuid[vm_ref] != os_port.device_id:
-                        connected_devices_match = False
-                        print('Inconsistent connectees for port %s: VC VM '
-                              'instanceUuid (%s) != OS port device_id (%s)' %
-                              (os_port.id,
-                               vm_ref_to_inst_uuid[vm_ref],
-                               os_port.device_id))
+                    vm_inst_uuid = vm_ref_to_inst_uuid[vm_ref]
+                if vm_inst_uuid != os_port.device_id:
+                    connected_devices_match = False
+                    print('Inconsistent connectees for port %s: VC VM '
+                          'instanceUuid (%s) != OS port device_id (%s)' %
+                          (os_port.id,
+                           vm_inst_uuid,
+                           os_port.device_id))
     if connected_devices_match:
         print('No inconsistencies between VC ports connectee instanceUuid and '
               'OS ports device_id.')
