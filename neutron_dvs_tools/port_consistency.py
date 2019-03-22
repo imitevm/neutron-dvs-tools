@@ -49,6 +49,7 @@ def get_dvs_ports(dvs):
 
 
 def report_dvs_port_name_duplications(dvs_ports):
+    print_subreport_heading('DVS port name duplications')
     name_to_ports = {}
     for p in dvs_ports:
         if not name_to_ports.get(p.config.name):
@@ -72,16 +73,22 @@ def report_dvs_port_name_duplications(dvs_ports):
 def report_port_inconsistencies(dvs_uuid, dvs_ports, os_ports, vm_ref_to_props,
                                 pg_ref_to_props):
     os_port_ids = set()
-    os_port_device_id_to_sgs = {}
+    os_port_device_id_to_sg_sets = {}
 
-    # Connectee (device ID) consistency
+    print_subreport_heading('Connectee (device ID) consistency')
     connected_devices_match = True
     for os_port in os_ports:
         os_port_ids.add(os_port.id)
-        if not os_port_device_id_to_sgs.get(os_port.device_id):
-            os_port_device_id_to_sgs[os_port.device_id] = []
-            os_port_device_id_to_sgs[os_port.device_id].extend(
-                os_port.security_group_ids)
+
+        # Store security group sets to use for portgroup consistency check
+        sg_set = [os_port.network_id]
+        if os_port.security_group_ids:
+            sg_set.append(','.join(os_port.security_group_ids))
+        sg_set = ':'.join(sg_set)
+        if not os_port_device_id_to_sg_sets.get(os_port.device_id):
+            os_port_device_id_to_sg_sets[os_port.device_id] = []
+        os_port_device_id_to_sg_sets[os_port.device_id].append(sg_set)
+
         for dvs_port in dvs_ports:
             if os_port.id == dvs_port.config.name:
                 vm_inst_uuid = None
@@ -100,37 +107,40 @@ def report_port_inconsistencies(dvs_uuid, dvs_ports, os_ports, vm_ref_to_props,
         print('No inconsistencies between VC ports connectee instanceUuid and '
               'OS ports device_id.')
 
-    # VM portgroup consistency with OS port security group
+    print_subreport_heading(
+        'VM portgroup consistency with OS port security group')
     portgroups_match = True
     for vm_ref, vm_props in vm_ref_to_props.items():
-        sgs = (os_port_device_id_to_sgs.get(vm_props['config.instanceUuid'])
-               or [])
-        #FIXME: Must put SG set but not SG ID
-        expected_pg_names = set([get_portgroup_name(dvs_uuid, sg)
-                                 for sg in sgs])
+        sg_sets = (os_port_device_id_to_sg_sets.get(
+            vm_props['config.instanceUuid'])
+            or [])
+        expected_pg_names = set([get_portgroup_name(dvs_uuid, sg_set)
+                                 for sg_set in sg_sets])
         actual_pg_names = set([pg_ref_to_props[pg_ref]['name']
                                for pg_ref in vm_props['network']])
         os_only_pgs = expected_pg_names - actual_pg_names
         dvs_only_pgs = actual_pg_names - expected_pg_names
         if os_only_pgs or dvs_only_pgs:
             portgroups_match = False
-            print('Inconsistent portgroups for VM  % s:'%vm_ref)
+            print('Inconsistent portgroups for VM ref %s '
+                  '(device_id/instanceUuid %s):' %
+                  (vm_ref, vm_props['config.instanceUuid']))
             if os_only_pgs:
-                print('Expected but missing connection to portgroups:\n%s' %
-                      '\n'.join(os_only_pgs))
+                print('  Expected but missing connection to PGs:\n    %s'
+                      % '\n    '.join(os_only_pgs))
             if dvs_only_pgs:
-                print('Unexpected but present connection to portgroups:\n%s' %
-                      '\n'.join(dvs_only_pgs))
+                print('  Unexpected but present connection to PGs:\n    %s'
+                      % '\n    '.join(dvs_only_pgs))
     if portgroups_match:
         print('No inconsistencies between VC VM portgroup connections and OS '
               'ports security groups.')
 
-    # Port mapping
+    print_subreport_heading('Port mapping')
     dvs_port_names = set([p.config.name for p in dvs_ports])
     dvs_only_ports = dvs_port_names - os_port_ids
     os_only_ports = os_port_ids - dvs_port_names
-    print('vSphere-only ports:\n%s' % '\n'.join(dvs_only_ports))
-    print('OpenStack-only ports:\n%s' % '\n'.join(os_only_ports))
+    print('vSphere-only ports:\n  %s' % '\n  '.join(dvs_only_ports))
+    print('OpenStack-only ports:\n  %s' % '\n  '.join(os_only_ports))
 
 
 def get_mo_ref_to_props(content, filter_spec):
@@ -174,6 +184,11 @@ def get_portgroup_name(dvs_uuid, sg_set):
         hex.update(sg_set)
         name = hex.hexdigest() + '-' + dvs_id
     return name
+
+
+def print_subreport_heading(heading):
+    print('\n\n' + heading)
+    print('-' * len(heading))
 
 
 def main():
