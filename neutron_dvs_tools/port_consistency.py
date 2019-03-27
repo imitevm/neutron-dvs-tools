@@ -5,6 +5,7 @@ import sys
 import argparse
 from openstack import connection as os_connection
 import hashlib
+import time
 
 
 def get_args():
@@ -12,7 +13,7 @@ def get_args():
 
     parser.add_argument('--vc-host',
                         required=True,
-                        help='vSpehre server host')
+                        help='vSpehre server hostname')
 
     parser.add_argument('--vc-port',
                         type=int,
@@ -30,6 +31,10 @@ def get_args():
     parser.add_argument('--dvs-uuid',
                         required=True,
                         help='DVS UUID')
+
+    parser.add_argument('--os-compute-host',
+                        required=True,
+                        help='OpenStack compute host name')
 
     args = parser.parse_args()
     return args
@@ -72,23 +77,9 @@ def report_dvs_port_name_duplications(dvs_ports):
 
 def report_port_inconsistencies(dvs_uuid, dvs_ports, os_ports, vm_ref_to_props,
                                 pg_ref_to_props):
-    os_port_ids = set()
-    os_port_device_id_to_sg_sets = {}
-
     print_subreport_heading('Connectee (device ID) consistency')
     connected_devices_match = True
     for os_port in os_ports:
-        os_port_ids.add(os_port.id)
-
-        # Store security group sets to use for portgroup consistency check
-        sg_set = [os_port.network_id]
-        if os_port.security_group_ids:
-            sg_set.append(','.join(os_port.security_group_ids))
-        sg_set = ':'.join(sg_set)
-        if not os_port_device_id_to_sg_sets.get(os_port.device_id):
-            os_port_device_id_to_sg_sets[os_port.device_id] = []
-        os_port_device_id_to_sg_sets[os_port.device_id].append(sg_set)
-
         for dvs_port in dvs_ports:
             if os_port.id == dvs_port.config.name:
                 vm_inst_uuid = None
@@ -109,6 +100,16 @@ def report_port_inconsistencies(dvs_uuid, dvs_ports, os_ports, vm_ref_to_props,
 
     print_subreport_heading(
         'VM portgroup consistency with OS port security group')
+    os_port_device_id_to_sg_sets = {}
+    for os_port in os_ports:
+        sg_set = [os_port.network_id]
+        if os_port.security_groups:
+            sg_set.append(','.join(os_port.security_groups))
+        sg_set = ':'.join(sg_set)
+        if not os_port_device_id_to_sg_sets.get(os_port.device_id):
+            os_port_device_id_to_sg_sets[os_port.device_id] = []
+        os_port_device_id_to_sg_sets[os_port.device_id].append(sg_set)
+
     portgroups_match = True
     for vm_ref, vm_props in vm_ref_to_props.items():
         sg_sets = (os_port_device_id_to_sg_sets.get(
@@ -136,6 +137,7 @@ def report_port_inconsistencies(dvs_uuid, dvs_ports, os_ports, vm_ref_to_props,
               'ports security groups.')
 
     print_subreport_heading('Port mapping')
+    os_port_ids = set([p.id for p in os_ports])
     dvs_port_names = set([p.config.name for p in dvs_ports])
     dvs_only_ports = dvs_port_names - os_port_ids
     os_only_ports = os_port_ids - dvs_port_names
@@ -187,12 +189,14 @@ def get_portgroup_name(dvs_uuid, sg_set):
 
 
 def print_subreport_heading(heading):
-    print('\n\n' + heading)
+    msg = '\n\n%s (started at %s)' % (heading, time.ctime())
+    print(msg)
     print('-' * len(heading))
 
 
 def main():
     args = get_args()
+    print('Report start: %s' % time.ctime())
 
     with SmartConnection(host=args.vc_host,
                          user=args.vc_user,
@@ -217,9 +221,14 @@ def main():
         report_dvs_port_name_duplications(dvs_ports)
 
         with os_connection.Connection(cloud='envvars') as os_conn:
-            os_ports = os_conn.network.ports()
+            os_ports = os_conn.list_ports(
+                {'binding:host_id': args.os_compute_host})
+            os_ports = [p for p in os_ports
+                        if p.get('binding:vif_type') == 'dvs']
             report_port_inconsistencies(args.dvs_uuid, dvs_ports, os_ports,
                                         vm_ref_to_props, pg_ref_to_props)
+
+    print('Report end: %s' % time.ctime())
 
 
 if __name__ == "__main__":
