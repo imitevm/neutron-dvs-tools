@@ -56,7 +56,7 @@ def get_dvs_ports(dvs):
     criteria.inside = True
     criteria.uplinkPort = False
     return [p for p in dvs.FetchDVPorts(criteria=criteria)
-            if p.config and p.config.name]
+            if p.connectee or p.config and p.config.name]
 
 
 def get_mo_ref_to_props(content, filter_spec):

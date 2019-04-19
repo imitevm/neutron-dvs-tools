@@ -21,101 +21,71 @@ def align_vc_with_os(dvs_uuid, dvs_ports, os_ports, pg_ref_to_props,
                       os_port)
         os_pis.append(pi)
 
-    # Remove matching ports from collections; single DVS port per OS port
+    utils.print_stage_heading('Renaming misnamed DVS ports and moving '
+                              'misplaced ones to correct portgroup')
+    # Also remove matching ports from collections; single DVS port per OS port
     for oi in range_reverse_list_iter(os_pis):
         os_pi = os_pis[oi]
         for di in range_reverse_list_iter(dvs_pis):
             dvs_pi = dvs_pis[di]
-            if (os_pi.port_id == dvs_pi.port_id and
-                    os_pi.pg_name == dvs_pi.pg_name and
-                    os_pi.device_id == dvs_pi.device_id):
+            if os_pi.device_id == dvs_pi.device_id:
+                if os_pi.port_id != dvs_pi.port_id:
+                    rename_dvs_port(dvs_pi.backing, os_pi.port_id, dvs,
+                                    service_instance)
+
+                if os_pi.pg_name != dvs_pi.pg_name:
+                    move_dvs_port(dvs_pi, os_pi.pg_name, pg_ref_to_props, dvs,
+                                  service_instance)
+
                 os_pis.pop(oi)
                 dvs_pis.pop(di)
                 break
 
-    rename_misnamed_dvs_ports(os_pis, dvs_pis, dvs, service_instance)
-
-    move_misplaced_dvs_ports(os_pis, dvs_pis, pg_ref_to_props, dvs,
-                             service_instance)
-
-    utils.print_stage_heading('Disconnecting misconnected DVS ports')
+    utils.print_stage_heading('Disconnecting orphaned DVS ports')
     for dvs_pi in dvs_pis:
         dvs_port = dvs_pi.backing
         disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance)
 
-    # TODO: Where only device_id differs => Connect to VM if exists
+    # TODO: Rename DVS ports to blank
 
-    # TODO: Connect VMs (from OS ports device_id) to portgroups
-
-    # TODO: Rename ports - DVS ports to blank and new ports (from OS) to device_id
+    # TODO: Report unmatched OpenStack ports
 
 
-def rename_misnamed_dvs_ports(os_pis, dvs_pis, dvs, service_instance):
-    utils.print_stage_heading('Renaming misnamed DVS ports')
-    for oi in range_reverse_list_iter(os_pis):
-        os_pi = os_pis[oi]
-        for di in range_reverse_list_iter(dvs_pis):
-            dvs_pi = dvs_pis[di]
-            if (os_pi.port_id != dvs_pi.port_id and
-                    os_pi.pg_name == dvs_pi.pg_name and
-                    os_pi.device_id == dvs_pi.device_id):
-                dvs_port = dvs_pi.backing
-                spec = vim.DVPortConfigSpec(operation='edit')
-                spec.name = os_pi.port_id
-                spec.key = dvs_port.key
-                spec.configVersion = dvs_port.config.configVersion
-                try:
-                    task = dvs.ReconfigureDVPort_Task(port=[spec])
-                    WaitForTask(task, si=service_instance)
-                    print('Renamed DVS port from %s to %s.' %
-                          (dvs_pi.backing.name, spec.name))
-
-                    os_pis.pop(oi)
-                    dvs_pis.pop(di)
-                    break
-                except vim.fault.VimFault as e:
-                    print_err('Failed renaming DVS port from %s to %s.' %
-                              (dvs_pi.backing.name, spec.name),
-                              exc=e)
+def rename_dvs_port(dvs_port, name, dvs, service_instance):
+    spec = vim.DVPortConfigSpec(operation='edit')
+    spec.name = name
+    spec.key = dvs_port.key
+    try:
+        task = dvs.ReconfigureDVPort_Task(port=[spec])
+        WaitForTask(task, si=service_instance)
+        print('Renamed DVS port from %s to %s.' % (dvs_port.name, spec.name))
+    except vim.fault.VimFault as e:
+        print_err('Failed renaming DVS port from %s to %s.' %
+                  (dvs_port.name, spec.name),
+                  exc=e)
 
 
-def move_misplaced_dvs_ports(os_pis, dvs_pis, pg_ref_to_props, dvs,
-                             service_instance):
-    utils.print_stage_heading('Moving misplaced DVS ports to correct portgroup')
-    for oi in range_reverse_list_iter(os_pis):
-        os_pi = os_pis[oi]
-        for di in range_reverse_list_iter(dvs_pis):
-            dvs_pi = dvs_pis[di]
-            if (os_pi.port_id == dvs_pi.port_id and
-                    os_pi.pg_name != dvs_pi.pg_name and
-                    os_pi.device_id == dvs_pi.device_id):
-                os_pg_key = None
-                for pg in pg_ref_to_props.values():
-                    if pg['name'] == os_pi.pg_name:
-                        os_pg_key = pg['key']
-                        break
-                if not os_pg_key:
-                    print_err('Could not move DVS port %s to portgroup %s '
-                              'since no portgroup found for that name.' %
-                              (dvs_pi.port_id, os_pi.pg_name))
-                    break
-                try:
-                    task = dvs.MoveDVPort_Task(
-                        portKey=[dvs_pi.backing.key],
-                        destinationPortgroupKey=os_pg_key)
-                    WaitForTask(task, si=service_instance)
-                    print('Moved DVS port %s from portgroup %s to %s.' %
-                          (dvs_pi.port_id, dvs_pi.pg_name, os_pi.pg_name))
-
-                    os_pis.pop(oi)
-                    dvs_pis.pop(di)
-                    break
-                except vim.fault.VimFault as e:
-                    print_err('Failed moving DVS port %s from portgroup %s to '
-                              '%s.' % (dvs_pi.port_id,
-                                       dvs_pi.pg_name,
-                                       os_pi.pg_name),
-                              exc=e)
+def move_dvs_port(dvs_pi, pg_name, pg_ref_to_props, dvs, service_instance):
+    os_pg_key = None
+    for pg in pg_ref_to_props.values():
+        if pg['name'] == pg_name:
+            os_pg_key = pg['key']
+            break
+    if not os_pg_key:
+        print_err('Could not move DVS port %s to portgroup %s '
+                  'since no portgroup found with that name.' %
+                  (dvs_pi.port_id, pg_name))
+        return
+    try:
+        task = dvs.MoveDVPort_Task(portKey=[dvs_pi.backing.key],
+                                   destinationPortgroupKey=os_pg_key)
+        WaitForTask(task, si=service_instance)
+        print('Moved DVS port %s from portgroup %s to %s.' %
+              (dvs_pi.port_id, dvs_pi.pg_name, pg_name))
+    except vim.fault.VimFault as e:
+        print_err('Failed moving DVS port %s from portgroup %s to %s.' %
+                  (dvs_pi.port_id, dvs_pi.pg_name, pg_name),
+                  exc=e)
 
 
 def disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance):
@@ -124,6 +94,7 @@ def disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance):
     nic_device.key = dvs_port.connectee.nicKey
     device_spec = vim.vm.device.VirtualDeviceSpec()
     device_spec.device = nic_device
+    # TODO: disconnect DVS port instead of removing NIC?
     device_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.remove
     config_spec = vim.vm.ConfigSpec(deviceChange=[device_spec])
     try:

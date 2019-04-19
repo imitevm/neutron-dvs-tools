@@ -5,9 +5,10 @@ def report_dvs_port_name_duplications(dvs_ports):
     utils.print_stage_heading('DVS port name duplications')
     name_to_ports = {}
     for p in dvs_ports:
-        if not name_to_ports.get(p.config.name):
-            name_to_ports[p.config.name] = []
-        name_to_ports[p.config.name].append(p)
+        if p.config.name:
+            if not name_to_ports.get(p.config.name):
+                name_to_ports[p.config.name] = []
+            name_to_ports[p.config.name].append(p)
 
     duplicates_exist = False
     for name in name_to_ports:
