@@ -86,7 +86,7 @@ def report_pg_sg_consistency(dvs_uuid, os_ports, pg_ref_to_props,
 def report_port_mapping(dvs_ports, os_ports):
     utils.print_stage_heading('Port mapping')
     os_port_ids = set([p.id for p in os_ports])
-    dvs_port_names = set([p.config.name for p in dvs_ports])
+    dvs_port_names = set([p.config.name for p in dvs_ports if p.config.name])
     dvs_only_ports = dvs_port_names - os_port_ids
     os_only_ports = os_port_ids - dvs_port_names
     print('vSphere-only ports:\n  %s' % '\n  '.join(dvs_only_ports))

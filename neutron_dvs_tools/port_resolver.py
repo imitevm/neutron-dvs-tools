@@ -5,7 +5,7 @@ from pyVmomi import vim
 
 def align_vc_with_os(dvs_uuid, dvs_ports, os_ports, pg_ref_to_props,
                      vm_ref_to_props, dvs, service_instance):
-    print('\nAlign vCenter ports with OpenStack')
+    print('\n=== Align vCenter ports with OpenStack ===')
 
     # Build PortInfo collections for DVS and OpenStack ports
     dvs_pis = []
@@ -41,14 +41,24 @@ def align_vc_with_os(dvs_uuid, dvs_ports, os_ports, pg_ref_to_props,
                 dvs_pis.pop(di)
                 break
 
-    utils.print_stage_heading('Disconnecting orphaned DVS ports')
+    utils.print_stage_heading('Renaming orphaned DVS ports to blank')
     for dvs_pi in dvs_pis:
         dvs_port = dvs_pi.backing
-        disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance)
+        if dvs_port.config.name:
+            rename_dvs_port(dvs_port, '', dvs, service_instance)
 
-    # TODO: Rename DVS ports to blank
+    utils.print_stage_heading('Report remaining misconnected DVS ports')
+    for dvs_pi in dvs_pis:
+        dvs_port = dvs_pi.backing
+        if dvs_port.connectee:
+            # disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance)
+            print('Misconnected DVS port with key %s (VM instanceUuid = %s).' %
+                  (dvs_port.key, dvs_pi.device_id))
 
-    # TODO: Report unmatched OpenStack ports
+    utils.print_stage_heading('Report remaining unmatched OpenStack ports')
+    for os_pi in os_pis:
+        print('Unmatched OpenStack port: ID = %s, target PG name = %s, device '
+              'ID = %s.' % (os_pi.port_id, os_pi.pg_name, os_pi.device_id))
 
 
 def rename_dvs_port(dvs_port, name, dvs, service_instance):
@@ -58,10 +68,11 @@ def rename_dvs_port(dvs_port, name, dvs, service_instance):
     try:
         task = dvs.ReconfigureDVPort_Task(port=[spec])
         WaitForTask(task, si=service_instance)
-        print('Renamed DVS port from %s to %s.' % (dvs_port.name, spec.name))
+        print('Renamed DVS port from %s to %s.' % (dvs_port.config.name,
+                                                   spec.name))
     except vim.fault.VimFault as e:
         print_err('Failed renaming DVS port from %s to %s.' %
-                  (dvs_port.name, spec.name),
+                  (dvs_port.config.name, spec.name),
                   exc=e)
 
 
@@ -91,21 +102,20 @@ def move_dvs_port(dvs_pi, pg_name, pg_ref_to_props, dvs, service_instance):
 def disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance):
     vm_ref = dvs_port.connectee.connectedEntity
     nic_device = vim.vm.device.VirtualDevice()
-    nic_device.key = dvs_port.connectee.nicKey
+    nic_device.key = int(dvs_port.connectee.nicKey)
     device_spec = vim.vm.device.VirtualDeviceSpec()
     device_spec.device = nic_device
-    # TODO: disconnect DVS port instead of removing NIC?
     device_spec.operation = vim.vm.device.VirtualDeviceSpec.Operation.remove
     config_spec = vim.vm.ConfigSpec(deviceChange=[device_spec])
     try:
         task = vm_ref.ReconfigVM_Task(spec=config_spec)
         WaitForTask(task, si=service_instance)
         print('Disconnected DVS port %s (VM instanceUuid = %s).' %
-              (dvs_port.name,
+              (dvs_port.config.name,
                vm_ref_to_props[vm_ref]['config.instanceUuid']))
     except vim.fault.VimFault as e:
         print_err('Failed disconnecting DVS port %s (VM instanceUuid = %s).' %
-                  (dvs_port.name,
+                  (dvs_port.config.name,
                    vm_ref_to_props[vm_ref]['config.instanceUuid']),
                   exc=e)
 

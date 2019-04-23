@@ -56,7 +56,14 @@ def get_dvs_ports(dvs):
     criteria.inside = True
     criteria.uplinkPort = False
     return [p for p in dvs.FetchDVPorts(criteria=criteria)
-            if p.connectee or p.config and p.config.name]
+            if is_dvs_port_in_scope(p)]
+
+
+def is_dvs_port_in_scope(p):
+    connected_to_vm = (p.connectee and p.connectee.type ==
+                       vim.dvs.PortConnectee.ConnecteeType.vmVnic)
+    named_but_disconnected = p.config and p.config.name and not p.connectee
+    return connected_to_vm or named_but_disconnected
 
 
 def get_mo_ref_to_props(content, filter_spec):
@@ -136,7 +143,7 @@ def main():
                                                vm_ref_to_props, dvs,
                                                service_instance)
 
-    print('Report end: %s' % time.ctime())
+    print('\nReport end: %s' % time.ctime())
 
 
 if __name__ == "__main__":
