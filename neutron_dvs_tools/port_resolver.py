@@ -41,16 +41,20 @@ def align_vc_with_os(dvs_uuid, dvs_ports, os_ports, pg_ref_to_props,
                 dvs_pis.pop(di)
                 break
 
-    utils.print_stage_heading('Renaming orphaned DVS ports to blank')
+    utils.print_stage_heading('Renaming to blank or removing orphaned DVS '
+                              'ports')
     for dvs_pi in dvs_pis:
         dvs_port = dvs_pi.backing
-        if dvs_port.config.name:
+        if not dvs_port.connectee:
+            remove_dvs_port(dvs_port, dvs, service_instance)
+        elif dvs_port.config.name:
             rename_dvs_port(dvs_port, '', dvs, service_instance)
 
     utils.print_stage_heading('Report remaining misconnected DVS ports')
     for dvs_pi in dvs_pis:
         dvs_port = dvs_pi.backing
         if dvs_port.connectee:
+            # Cannot remove NIC if VM is not powered off
             # disconnect_dvs_port(dvs_port, vm_ref_to_props, service_instance)
             print('Misconnected DVS port with key %s (VM instanceUuid = %s).' %
                   (dvs_port.key, dvs_pi.device_id))
@@ -68,11 +72,25 @@ def rename_dvs_port(dvs_port, name, dvs, service_instance):
     try:
         task = dvs.ReconfigureDVPort_Task(port=[spec])
         WaitForTask(task, si=service_instance)
-        print('Renamed DVS port from %s to %s.' % (dvs_port.config.name,
-                                                   spec.name))
+        print('Renamed DVS port with key %s from %s to %s.' %
+              (dvs_port.key, dvs_port.config.name, spec.name))
     except vim.fault.VimFault as e:
-        print_err('Failed renaming DVS port from %s to %s.' %
-                  (dvs_port.config.name, spec.name),
+        print_err('Failed renaming DVS port with key %s from %s to %s.' %
+                  (dvs_port.key, dvs_port.config.name, spec.name),
+                  exc=e)
+
+
+def remove_dvs_port(dvs_port, dvs, service_instance):
+    spec = vim.DVPortConfigSpec(operation='remove')
+    spec.key = dvs_port.key
+    try:
+        task = dvs.ReconfigureDVPort_Task(port=[spec])
+        WaitForTask(task, si=service_instance)
+        print('Removed DVS port %s (key = %s).' %
+              (dvs_port.config.name, dvs_port.key))
+    except vim.fault.VimFault as e:
+        print_err('Failed removing DVS port %s (key = %s).' %
+                  (dvs_port.config.name, dvs_port.key),
                   exc=e)
 
 
