@@ -43,10 +43,11 @@ def align_vc_with_os(dvs_uuid, dvs_ports, os_ports, pg_ref_to_props,
 
     utils.print_stage_heading('Renaming to blank or removing orphaned DVS '
                               'ports')
-    for dvs_pi in dvs_pis:
-        dvs_port = dvs_pi.backing
+    for di in range_reverse_list_iter(dvs_pis):
+        dvs_port = dvs_pis[di].backing
         if not dvs_port.connectee:
             remove_dvs_port(dvs_port, dvs, service_instance)
+            dvs_pis.pop(di)
         elif dvs_port.config.name:
             rename_dvs_port(dvs_port, '', dvs, service_instance)
 
